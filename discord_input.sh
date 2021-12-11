@@ -1,5 +1,6 @@
-# <one line to give the program's name and a brief idea of what it does.>
-# Copyright (C) 2021  Vidhu Kant Sharma
+#!/usr/bin/env bash
+# discord_input.sh: easily merge multiple audio streams together for discord, etc
+# Copyright (C) 2021  Vidhu Kant Sharma (vidhukant@protonmail.ch)
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,13 +15,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#!/usr/bin/env bash
-
-switch_discord_input=ask # ask|yes|no
+switch_discord_input=ask
 sink_name=merged_streams
 sink_description=""
 
-while getopts 'n:s:N:S' flag; do
+while getopts 'n:s:N:D' flag; do
   case "${flag}" in
     n) no_of_streams="${OPTARG}" ;;
     s) switch_discord_input="${OPTARG}" ;;
@@ -30,14 +29,29 @@ while getopts 'n:s:N:S' flag; do
   esac
 done
 
-if [ "$sink_description" == "" ]; then
-  sink_description="$sink_name"
+# handle invalid input for -s
+if [ "$switch_discord_input" != yes ] && \
+   [ "$switch_discord_input" != no  ] && \
+   [ "$switch_discord_input" != ask ]
+then
+  echo "ERROR: Please enter a valid input for -s (yes/no/ask)" >&2;exit 1
+  exit 1
 fi
 
 # get the amount of streams to merge if not specified
 if [ "$no_of_streams" = "" ]; then
   printf "\033[1;36mEnter number of sinks/sources to merge: \033[0m"
   read -r no_of_streams
+else
+  # handle invalid input for -n
+  re='^[0-9]+$'
+  if ! [[ "$no_of_streams" =~ $re ]] ; then
+    echo "ERROR: -n is not specified a number!" >&2; exit 1
+  fi
+fi
+
+if [ "$sink_description" == "" ]; then
+  sink_description="$sink_name"
 fi
 
 # create NULL sink to merge all the audio streams
@@ -77,7 +91,7 @@ i=0; while [ $i -lt "$no_of_streams" ]; do
   pacmd load-module module-loopback sink="$sink_name" source="$source_sel"
 
   # get new loopback's index and rename loopback
-  loopback_idx=$(pacmd list-source-outputs | egrep '(.*index: .*)|(^\s+media.name = .*)' | awk "/Loopback to $sink_name/ {printf f} {f=\$2}")
+  loopback_idx=$(pacmd list-source-outputs | grep -E '(.*index: .*)|(^\s+media.name = .*)' | awk "/Loopback to $sink_name/ {printf f} {f=\$2}")
   pacmd update-source-output-proplist "$loopback_idx" media.name="\"Merged stream #$((i+1))\""
 
   i=$((i + 1))
@@ -86,11 +100,11 @@ done
 # check if switching disabled through flags
 if [ "$switch_discord_input" != no ]; then
   # get index of discord's source output
-  discord_idx="$(pacmd list-source-outputs | egrep '(.*index: .*)|(^\s+application.process.binary = .*)' | awk '/Discord/ {printf f} {f=$2}')"
+  discord_idx="$(pacmd list-source-outputs | grep -E '(.*index: .*)|(^\s+application.process.binary = .*)' | awk '/Discord/ {printf f} {f=$2}')"
   
   # ask the user and change discord's input to new input
   if [ "$discord_idx" == "" ]; then
-    printf "\033[1;31mDiscord instance not found/recording. If it is running, please use Discord settings or pavucontrol to manually change its input.\033[0m\n"
+    printf "\033[1;34mDiscord instance not found/recording. If it is running, please use Discord settings or pavucontrol to manually change its input.\033[0m\n"
   else
     if [ "$switch_discord_input" == ask ]; then
       printf "\033[1;36mDiscord is running, switch discord's input to new merged input?(y/n)\033[0m "
@@ -100,7 +114,6 @@ if [ "$switch_discord_input" != no ]; then
         read -r response
   
         if [ "$response" == y ] || [ "$response" == Y ]; then
-          echo did it
           pacmd move-source-output "$discord_idx" "$sink_name.monitor"
           break
         elif [ "$response" == n ] || [ "$response" == N ]; then
@@ -110,7 +123,6 @@ if [ "$switch_discord_input" != no ]; then
         fi
       done
     else
-      echo did it
       pacmd move-source-output "$discord_idx" "$sink_name.monitor"
     fi
   fi
