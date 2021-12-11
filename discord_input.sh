@@ -23,23 +23,28 @@ show_help() {
   echo -e "Usage:"
   echo -e "\tNo Flags: Interactive Mode"
   echo -e "-n\tSpecify Number Of Streams"
-  echo -e "-s\tSwitch Discord's Input Or Not (yes/no/ask)"
+  echo -e "-s\tSpecify a sink to loopback from"
+  echo -e "-S\tSwitch Discord's Input Or Not (yes/no/ask). if -s is used, 'ask' will be disabled"
   echo -e "-N\tSpecify a Name For The Merged Sink"
   echo -e "-D\tSpecify a Description For The Merged Sink"
 
   exit
 }
 
-while getopts 'n:s:N:D:h' flag; do
+while getopts 'n:s:S:N:D:h' flag; do
   case "${flag}" in
     n) no_of_streams="${OPTARG}" ;;
-    s) switch_discord_input="${OPTARG}" ;;
+    s) spec_sources+=("$OPTARG")  ;;
+    S) switch_discord_input="${OPTARG}" ;;
     N) sink_name="${OPTARG}" ;;
     D) sink_description="${OPTARG}" ;;
     h) show_help ;;
     *) ;;
   esac
 done
+shift $((OPTIND -1))
+
+spec_sources_len="${#spec_sources[@]}"
 
 # handle invalid input for -s
 if [ "$switch_discord_input" != yes ] && \
@@ -51,14 +56,36 @@ then
 fi
 
 # get the amount of streams to merge if not specified
-if [ "$no_of_streams" = "" ]; then
-  printf "\033[1;36mEnter number of sinks/sources to merge: \033[0m"
-  read -r no_of_streams
-else
+if [ "$no_of_streams" != "" ]; then # if -n is used
   # handle invalid input for -n
   re='^[0-9]+$'
   if ! [[ "$no_of_streams" =~ $re ]] ; then
     echo "ERROR: -n is not specified a number!" >&2; exit 1
+  fi
+
+  # if -s is used
+  if [ "$spec_sources_len" != 0 ]; then 
+    # check if args of -n exceed spec_sources
+    if ! [ "$spec_sources_len" -eq "$no_of_streams" ]; then
+      echo -e "ERROR: arguments of -n don't match number of sources specified.\nPlease only pass the number of -s flags in -n, or omit -n overall." >&2; exit 1
+    fi
+    # check if switch_discord_input is 'ask', and shows error
+    if [ "$switch_discord_input" == ask ]; then
+      echo "ERROR: -s flag disables interactive mode, so -S can't be 'ask'" >&2; exit 1
+    fi
+  fi
+else # if -n not used
+  # if -s and -n are not used, it will ask for input
+  if [ "$spec_sources_len" == 0 ]; then
+    printf "\033[1;36mEnter number of sinks/sources to merge: \033[0m"
+    read -r no_of_streams
+  else
+    # checks if switch_discord_input is 'ask', and shows error
+    if [ "$switch_discord_input" == ask ]; then
+      echo "ERROR: -s flag disables interactive mode, so -S can't be 'ask'" >&2; exit 1
+    fi
+    # if sources specified using -s flag, no_of_streams will be calculated
+    no_of_streams="$spec_sources_len"
   fi
 fi
 
@@ -74,37 +101,43 @@ pacmd update-sink-proplist "$sink_name" device.description="$sink_description"
 pacmd update-source-proplist "$sink_name.monitor" device.description="\"Monitor of $sink_name\""
 
 i=0; while [ $i -lt "$no_of_streams" ]; do
-  # get sources and split
-  SAVEIFS=$IFS
-  IFS=$'\n'
-  # somebody help
-  sources=($(pacmd list-sources | awk '/name:/ {print $2}; /device.description/ {$1=$2=""; print $0}' | sed 's/^[ \t\"]*//; s/[ \t\"]$//' | awk 'NR%2==0 {printf "\033[34m"$0"\t \033[0;32m"f"\033[0m\n"}  {f=$0}'))
-  IFS=$SAVEIFS
+  # ask to enter sources if not passed with flags
+  if [ "$spec_sources_len" == 0 ];then
+    # get sources and split
+    SAVEIFS=$IFS
+    IFS=$'\n'
+    # somebody help
+    sources=($(pacmd list-sources | awk '/name:/ {print $2}; /device.description/ {$1=$2=""; print $0}' | sed 's/^[ \t\"]*//; s/[ \t\"]$//' | awk 'NR%2==0 {printf "\033[34m"$0"\t \033[0;32m"f"\033[0m\n"}  {f=$0}'))
+    IFS=$SAVEIFS
 
-  # print all the sources with their indices
-  for (( j=0; j<${#sources[@]}; j++ )); do
-    unformatted_sink_name="$(echo "${sources[j]}" | sed 's/\x1B\[[0-9;]\{1,\}[A-Za-z]//g')"
-    new_sink_name="Monitor of $sink_name	 <$sink_name.monitor>"
+    # print all the sources with their indices
+    for (( j=0; j<${#sources[@]}; j++ )); do
+      unformatted_sink_name="$(echo "${sources[j]}" | sed 's/\x1B\[[0-9;]\{1,\}[A-Za-z]//g')"
+      new_sink_name="Monitor of $sink_name	 <$sink_name.monitor>"
 
-    # do not print the newly created NULL output's monitor
-    if [ "$unformatted_sink_name" != "$new_sink_name" ]; then
-      printf "\033[1;33m%s: %s\n" "$j" "${sources[$j]}"
-    fi
-  done
+      # do not print the newly created NULL output's monitor
+      if [ "$unformatted_sink_name" != "$new_sink_name" ]; then
+        printf "\033[1;33m%s: %s\n" "$j" "${sources[$j]}"
+      fi
+    done
 
-  # ask to enter source number
-  printf "\033[1;36mEnter a value: \033[0m"
-  read -r source_idx
+    # ask to enter source number
+    printf "\033[1;36mEnter a value: \033[0m"
+    read -r source_idx
 
-  # extract source name and save it
-  source_sel=$(echo "${sources[source_idx]}" | sed 's/\x1B\[[0-9;]\{1,\}[A-Za-z]//g' | awk -F "\t" '{print $2}' | sed 's/^[ <]*//; s/>$//')
+    # extract source name and save it
+    source_sel=$(echo "${sources[source_idx]}" | sed 's/\x1B\[[0-9;]\{1,\}[A-Za-z]//g' | awk -F "\t" '{print $2}' | sed 's/^[ <]*//; s/>$//')
+  else
+    # if source passed with -s flag use it
+    source_sel="${spec_sources[i]}"
+  fi
 
   # finally create loopback
   pacmd load-module module-loopback sink="$sink_name" source="$source_sel"
 
   # get new loopback's index and rename loopback
   loopback_idx=$(pacmd list-source-outputs | grep -E '(.*index: .*)|(^\s+media.name = .*)' | awk "/Loopback to $sink_name/ {printf f} {f=\$2}")
-  pacmd update-source-output-proplist "$loopback_idx" media.name="\"Merged stream #$((i+1))\""
+  pacmd update-source-output-proplist "$loopback_idx" media.name="\"Merged #$((i+1)) to $sink_name\""
 
   i=$((i + 1))
 done
@@ -139,5 +172,3 @@ if [ "$switch_discord_input" != no ]; then
     fi
   fi
 fi
-
-
