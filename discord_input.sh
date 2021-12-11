@@ -19,12 +19,24 @@ switch_discord_input=ask
 sink_name=merged_streams
 sink_description=""
 
-while getopts 'n:s:N:D' flag; do
+show_help() {
+  echo -e "Usage:"
+  echo -e "\tNo Flags: Interactive Mode"
+  echo -e "-n\tSpecify Number Of Streams"
+  echo -e "-s\tSwitch Discord's Input Or Not (yes/no/ask)"
+  echo -e "-N\tSpecify a Name For The Merged Sink"
+  echo -e "-D\tSpecify a Description For The Merged Sink"
+
+  exit
+}
+
+while getopts 'n:s:N:D:h' flag; do
   case "${flag}" in
     n) no_of_streams="${OPTARG}" ;;
     s) switch_discord_input="${OPTARG}" ;;
     N) sink_name="${OPTARG}" ;;
     D) sink_description="${OPTARG}" ;;
+    h) show_help ;;
     *) ;;
   esac
 done
