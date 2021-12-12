@@ -27,6 +27,7 @@ show_help() {
   echo -e "-S\tSwitch Discord's Input Or Not (yes/no/ask). if -s is used, 'ask' will be disabled"
   echo -e "-N\tSpecify a Name For The Merged Sink"
   echo -e "-D\tSpecify a Description For The Merged Sink"
+  echo -e "-h\tDisplay this message and quit"
 
   exit
 }
